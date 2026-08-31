@@ -1,7 +1,7 @@
 "use client";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Camera, CheckCircle2, Crosshair, ImagePlus, Loader2, MapPin, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -9,6 +9,7 @@ import { useWorkspace } from "@/components/workspace";
 import { Button, Card, Field, Input, Notice, Select, Textarea } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import type { Location, RecordItem } from "@/lib/types";
+import { VoiceCapture } from "@/components/voice-capture";
 
 const categories = ["施工进度", "安全巡查", "质量检查", "材料进场", "人员作业", "其他"] as const;
 const schema = z.object({ category: z.enum(categories), description: z.string().min(1, "请输入现场描述").max(5000), building: z.string().min(1, "请选择楼栋"), floor: z.string().min(1, "请选择楼层"), location_id: z.number().positive("请选择区域") });
@@ -16,6 +17,8 @@ type Values = z.infer<typeof schema>;
 type GPS = { status: "not_requested" | "loading" | "success" | "unsupported" | "denied" | "timeout" | "failed"; latitude?: number; longitude?: number; accuracy?: number; capturedAt?: string };
 
 export default function NewRecordPage() {
+  const search = useSearchParams();
+  const [mode, setMode] = useState<"manual" | "voice">(search.get("mode") === "voice" ? "voice" : "manual");
   const { user, project } = useWorkspace(); const router = useRouter(); const [locations, setLocations] = useState<Location[]>([]); const [files, setFiles] = useState<File[]>([]); const [fileError, setFileError] = useState(""); const [serverError, setServerError] = useState(""); const [uploading, setUploading] = useState(false); const [gps, setGps] = useState<GPS>({ status: "not_requested" });
   const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<Values>({ resolver: zodResolver(schema), defaultValues: { category: "安全巡查", building: "", floor: "" } });
   useEffect(() => { api<Location[]>(`/api/projects/${project.id}/locations`).then(setLocations).catch((e: ApiError) => setServerError(e.message)); }, [project.id]);
@@ -28,7 +31,9 @@ export default function NewRecordPage() {
   const chooseFiles = (incoming: FileList | null) => { if (!incoming) return; const next = [...files, ...Array.from(incoming)]; if (next.length > 9) { setFileError("每条记录最多上传 9 张照片"); return; } const bad = next.find((file) => file.size > 10 * 1024 * 1024 || !["image/jpeg","image/png","image/webp"].includes(file.type)); if (bad) { setFileError("仅支持 10MB 以内的 JPEG、PNG、WebP 图片"); return; } setFileError(""); setFiles(next); };
   const locate = () => { if (!("geolocation" in navigator)) { setGps({ status: "unsupported" }); return; } setGps({ status: "loading" }); navigator.geolocation.getCurrentPosition((position) => setGps({ status: "success", latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy, capturedAt: new Date(position.timestamp).toISOString() }), (error) => setGps({ status: error.code === 1 ? "denied" : error.code === 3 ? "timeout" : "failed" }), { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 }); };
   const submit = async (values: Values) => { setServerError(""); try { const record = await api<RecordItem>("/api/records", { method: "POST", body: JSON.stringify({ project_id: project.id, category: values.category, description: values.description, occurred_at: new Date().toISOString(), location_id: values.location_id, gps_status: gps.status === "loading" ? "failed" : gps.status, latitude: gps.status === "success" ? gps.latitude : null, longitude: gps.status === "success" ? gps.longitude : null, gps_accuracy: gps.status === "success" ? gps.accuracy : null, gps_captured_at: gps.status === "success" ? gps.capturedAt : null }) }); if (files.length) { setUploading(true); const form = new FormData(); files.forEach((file) => form.append("files", file)); try { await api(`/api/records/${record.id}/photos`, { method: "POST", body: form }); } catch (error) { setUploading(false); setServerError(`记录已保存，但照片上传失败：${(error as ApiError).message}。可进入记录详情重新处理。`); return; } } router.push(`/records/${record.id}?created=1`); } catch (error) { setServerError((error as ApiError).message); } finally { setUploading(false); } };
+  if (mode === "voice") return <VoiceCapture onManual={() => setMode("manual")}/>;
   return <div className="mx-auto max-w-2xl"><div className="mb-5"><h1 className="text-2xl font-bold">新建现场记录</h1><p className="mt-1 text-sm text-slate-600">记录原始事实，照片与位置将一并留存</p></div>
+    <div className="mb-4 grid grid-cols-2 rounded-xl bg-slate-200 p-1"><button type="button" className="min-h-11 rounded-lg bg-white font-semibold text-site-800 shadow-sm">文字填写</button><button type="button" className="min-h-11 rounded-lg font-semibold text-slate-700" onClick={() => setMode("voice")}>语音记录</button></div>
     <form className="space-y-4" onSubmit={handleSubmit(submit)}>
       {serverError && <Notice tone="error">{serverError}</Notice>}
       <Card className="space-y-4"><h2 className="font-bold">现场信息</h2><Field label="记录类别" error={errors.category?.message}><Select {...register("category")}>{categories.map((item) => <option key={item}>{item}</option>)}</Select></Field><Field label="现场描述" error={errors.description?.message}><Textarea placeholder="请如实描述现场看到的情况，不会自动改写" {...register("description")}/></Field><div className="grid grid-cols-2 gap-3"><Field label="记录时间"><Input value={new Date().toLocaleString("zh-CN")} readOnly/></Field><Field label="记录人"><Input value={`${user.name} · ${user.role}`} readOnly/></Field></div><Field label="所属项目"><Input value={project.name} readOnly/></Field></Card>

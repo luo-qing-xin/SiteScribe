@@ -7,9 +7,30 @@ from .db import SessionLocal
 from .models import Project, ProjectLocation, ProjectMember, SiteRecord, Task, User
 
 USERS = [
-    {"username": "zhangwei", "name": "张伟", "role": "安全员", "organization": "XX建设集团", "department": "安全部", "crew": None},
-    {"username": "wangqiang", "name": "王强", "role": "施工员", "organization": "XX建设集团", "department": "工程部", "crew": None},
-    {"username": "lijianguo", "name": "李建国", "role": "班组长", "organization": "XX劳务公司", "department": None, "crew": "钢筋班组"},
+    {
+        "username": "zhangwei",
+        "name": "张伟",
+        "role": "安全员",
+        "organization": "XX建设集团",
+        "department": "安全部",
+        "crew": None,
+    },
+    {
+        "username": "wangqiang",
+        "name": "王强",
+        "role": "施工员",
+        "organization": "XX建设集团",
+        "department": "工程部",
+        "crew": None,
+    },
+    {
+        "username": "lijianguo",
+        "name": "李建国",
+        "role": "班组长",
+        "organization": "XX劳务公司",
+        "department": None,
+        "crew": "钢筋班组",
+    },
 ]
 ZONES = ["东侧", "西侧", "南侧", "北侧", "核心区", "其他"]
 BUILDINGS = {"1号楼": 3, "2号楼": 3, "3号楼": 6}
@@ -29,11 +50,17 @@ def seed() -> None:
 
         project = db.scalar(select(Project).where(Project.name == "海悦花园项目"))
         if not project:
-            project = Project(name="海悦花园项目", organization="XX建设集团", address="广州市", status="施工中")
+            project = Project(
+                name="海悦花园项目", organization="XX建设集团", address="广州市", status="施工中"
+            )
             db.add(project)
             db.flush()
         for user in users.values():
-            if not db.scalar(select(ProjectMember).where(ProjectMember.project_id == project.id, ProjectMember.user_id == user.id)):
+            if not db.scalar(
+                select(ProjectMember).where(
+                    ProjectMember.project_id == project.id, ProjectMember.user_id == user.id
+                )
+            ):
                 db.add(ProjectMember(project_id=project.id, user_id=user.id))
 
         locations = {}
@@ -41,14 +68,18 @@ def seed() -> None:
             for floor_number in range(1, floor_count + 1):
                 for zone in ZONES:
                     key = (building, f"{floor_number}层", zone)
-                    location = db.scalar(select(ProjectLocation).where(
-                        ProjectLocation.project_id == project.id,
-                        ProjectLocation.building == key[0],
-                        ProjectLocation.floor == key[1],
-                        ProjectLocation.zone == key[2],
-                    ))
+                    location = db.scalar(
+                        select(ProjectLocation).where(
+                            ProjectLocation.project_id == project.id,
+                            ProjectLocation.building == key[0],
+                            ProjectLocation.floor == key[1],
+                            ProjectLocation.zone == key[2],
+                        )
+                    )
                     if not location:
-                        location = ProjectLocation(project_id=project.id, building=key[0], floor=key[1], zone=key[2])
+                        location = ProjectLocation(
+                            project_id=project.id, building=key[0], floor=key[1], zone=key[2]
+                        )
                         db.add(location)
                         db.flush()
                     locations[key] = location
@@ -75,9 +106,36 @@ def seed() -> None:
                 records.append(record)
             db.flush()
             tasks = [
-                Task(project_id=project.id, source_record_id=records[0].id, creator_id=users["zhangwei"].id, assignee_id=users["wangqiang"].id, title="补充安全通道标识", description="在1号楼二层东侧补充醒目标识。", due_at=now + timedelta(days=1), status="待处理"),
-                Task(project_id=project.id, source_record_id=records[1].id, creator_id=users["wangqiang"].id, assignee_id=users["lijianguo"].id, title="完成六层钢筋自检", description="绑扎完成后提交班组自检结果。", due_at=now + timedelta(days=2), status="处理中"),
-                Task(project_id=project.id, source_record_id=records[2].id, creator_id=users["zhangwei"].id, assignee_id=users["zhangwei"].id, title="核对材料合格证", description="核对本批钢筋合格证与批次。", due_at=now - timedelta(days=1), status="已完成"),
+                Task(
+                    project_id=project.id,
+                    source_record_id=records[0].id,
+                    creator_id=users["zhangwei"].id,
+                    assignee_id=users["wangqiang"].id,
+                    title="补充安全通道标识",
+                    description="在1号楼二层东侧补充醒目标识。",
+                    due_at=now + timedelta(days=1),
+                    status="OPEN",
+                ),
+                Task(
+                    project_id=project.id,
+                    source_record_id=records[1].id,
+                    creator_id=users["wangqiang"].id,
+                    assignee_id=users["lijianguo"].id,
+                    title="完成六层钢筋自检",
+                    description="绑扎完成后提交班组自检结果。",
+                    due_at=now + timedelta(days=2),
+                    status="IN_PROGRESS",
+                ),
+                Task(
+                    project_id=project.id,
+                    source_record_id=records[2].id,
+                    creator_id=users["zhangwei"].id,
+                    assignee_id=users["zhangwei"].id,
+                    title="核对材料合格证",
+                    description="核对本批钢筋合格证与批次。",
+                    due_at=now - timedelta(days=1),
+                    status="DONE",
+                ),
             ]
             db.add_all(tasks)
         db.commit()

@@ -2,8 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: light; }
+:root { color-scheme: light; --brand-red: #c9362a; --brand-ink: #171916; --brand-gold: #c99a3d; --paper: #f6f3ed; }
 * { box-sizing: border-box; }
-body { margin: 0; background: #f5f7f6; color: #17211e; font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif; }
+html { background: var(--paper); }
+body { margin: 0; background: var(--paper); color: #1d211d; font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif; font-feature-settings: "tnum" 1; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+::selection { background: #ffe2dc; color: #84251f; }
 
+.page-enter { animation: page-in .42s cubic-bezier(.2,.8,.2,1) both; }
+.competition-card { transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+.competition-card:hover { transform: translateY(-2px); box-shadow: 0 18px 44px rgba(23,25,22,.10); }
+.blueprint-grid { background-image: linear-gradient(rgba(255,255,255,.055) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.055) 1px, transparent 1px); background-size: 28px 28px; }
+.paper-grid { background-image: linear-gradient(rgba(23,25,22,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(23,25,22,.035) 1px, transparent 1px); background-size: 24px 24px; }
+.brand-rule { position: relative; }
+.brand-rule::before { content: ""; position: absolute; left: 0; top: 0; width: 3rem; height: 3px; background: linear-gradient(90deg, var(--brand-red), var(--brand-gold)); border-radius: 999px; }
+@keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.print-sheet { width: 100%; max-width: 210mm; min-height: 297mm; }
+.print-table th, .print-table td { border: 1px solid #111; padding: 6px; vertical-align: top; overflow-wrap: anywhere; }
+.draft-watermark { position: absolute; inset: 42% auto auto 27%; transform: rotate(-28deg); color: rgba(180, 30, 30, .12); font-size: 80px; font-weight: 800; pointer-events: none; }
+
+@media print {
+  @page { size: A4; margin: 0; }
+  body { background: white; }
+  .print-toolbar { display: none !important; }
+  .print-page { padding: 0 !important; }
+  .print-sheet { width: 210mm; max-width: none; box-shadow: none !important; break-after: page; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

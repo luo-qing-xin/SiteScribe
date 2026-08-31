@@ -1,5 +1,6 @@
 import io
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -56,6 +57,45 @@ def test_project_member_permission(client: TestClient, db, project_data):
     assert response.status_code == 403
 
 
+def test_dashboard_uses_project_timezone_and_exposes_workflow_metrics(
+    auth_client: TestClient, db, project_data
+):
+    project, location, member = project_data
+    project.timezone = "Asia/Shanghai"
+    local_now = datetime.now(UTC).astimezone(ZoneInfo(project.timezone))
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = local_midnight.astimezone(UTC)
+    db.add_all(
+        [
+            SiteRecord(
+                project_id=project.id,
+                recorder_id=member.id,
+                category="安全巡查",
+                description="项目本地今日记录",
+                occurred_at=today_start + timedelta(minutes=10),
+                gps_status="not_requested",
+                location_id=location.id,
+            ),
+            SiteRecord(
+                project_id=project.id,
+                recorder_id=member.id,
+                category="安全巡查",
+                description="项目本地昨日记录",
+                occurred_at=today_start - timedelta(minutes=10),
+                gps_status="not_requested",
+                location_id=location.id,
+            ),
+        ]
+    )
+    db.commit()
+    payload = auth_client.get(f"/api/projects/{project.id}/dashboard").json()
+    assert payload["today_records"] == 1
+    assert payload["confirmed_events"] == 0
+    assert payload["pending_issues"] == 0
+    assert payload["waiting_review_rectifications"] == 0
+    assert payload["closed_rectifications_today"] == 0
+
+
 def test_create_record_with_and_without_gps(auth_client: TestClient, project_data):
     project, location, _ = project_data
     no_gps = auth_client.post("/api/records", json=record_payload(project, location))
@@ -69,7 +109,9 @@ def test_create_record_with_and_without_gps(auth_client: TestClient, project_dat
 
 def test_upload_valid_image_and_reject_invalid(auth_client: TestClient, project_data):
     project, location, _ = project_data
-    record_id = auth_client.post("/api/records", json=record_payload(project, location)).json()["id"]
+    record_id = auth_client.post("/api/records", json=record_payload(project, location)).json()[
+        "id"
+    ]
     uploaded = auth_client.post(
         f"/api/records/{record_id}/photos",
         files={"files": ("../../unsafe.png", make_png(), "image/png")},
@@ -80,14 +122,17 @@ def test_upload_valid_image_and_reject_invalid(auth_client: TestClient, project_
     assert "unsafe" not in photo["content_url"]
     assert auth_client.get(photo["content_url"]).status_code == 200
     invalid = auth_client.post(
-        f"/api/records/{record_id}/photos", files={"files": ("fake.jpg", b"not an image", "image/jpeg")}
+        f"/api/records/{record_id}/photos",
+        files={"files": ("fake.jpg", b"not an image", "image/jpeg")},
     )
     assert invalid.status_code == 422
 
 
 def test_reject_oversized_photo(auth_client: TestClient, project_data):
     project, location, _ = project_data
-    record_id = auth_client.post("/api/records", json=record_payload(project, location)).json()["id"]
+    record_id = auth_client.post("/api/records", json=record_payload(project, location)).json()[
+        "id"
+    ]
     response = auth_client.post(
         f"/api/records/{record_id}/photos",
         files={"files": ("large.png", b"x" * (10 * 1024 * 1024 + 1), "image/png")},
@@ -97,7 +142,9 @@ def test_reject_oversized_photo(auth_client: TestClient, project_data):
 
 def test_linked_task_and_status_update(auth_client: TestClient, project_data):
     project, location, member = project_data
-    record_id = auth_client.post("/api/records", json=record_payload(project, location)).json()["id"]
+    record_id = auth_client.post("/api/records", json=record_payload(project, location)).json()[
+        "id"
+    ]
     task = auth_client.post(
         "/api/tasks",
         json={
@@ -119,7 +166,9 @@ def test_linked_task_and_status_update(auth_client: TestClient, project_data):
 
 def test_delete_record_cleans_media(auth_client: TestClient, db, project_data):
     project, location, _ = project_data
-    record_id = auth_client.post("/api/records", json=record_payload(project, location)).json()["id"]
+    record_id = auth_client.post("/api/records", json=record_payload(project, location)).json()[
+        "id"
+    ]
     auth_client.post(
         f"/api/records/{record_id}/photos", files={"files": ("photo.png", make_png(), "image/png")}
     )
@@ -130,4 +179,3 @@ def test_delete_record_cleans_media(auth_client: TestClient, db, project_data):
     assert response.status_code == 200
     assert not path.exists()
     assert db.get(SiteRecord, record_id) is None
-

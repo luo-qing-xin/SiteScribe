@@ -1,0 +1,50 @@
+{
+  "id": "synthetic-demo-001",
+  "synthetic": true,
+  "record_metadata": {
+    "source_id": "sample:synthetic-demo-001:record",
+    "record_id": 1,
+    "project_id": 1,
+    "recorder_id": 1,
+    "recorder_name": "张伟",
+    "recorder_role": "安全员",
+    "occurred_at": "2026-08-24T02:00:00Z",
+    "location": {
+      "source_id": "sample:synthetic-demo-001:location",
+      "id": 1,
+      "building": "3号楼",
+      "floor": "6层",
+      "zone": "西侧"
+    }
+  },
+  "confirmed_transcript": "今天3号楼六层钢筋绑扎完成大约80%，现场12名钢筋工。西侧材料堆放比较乱，影响通道，通知李班长今天下午处理。",
+  "photo_references": [],
+  "gold_event": {
+    "schema_version": "1.0",
+    "event_type": "site_inspection",
+    "construction": {
+      "activity": "钢筋绑扎",
+      "crew": null,
+      "worker_count": 12,
+      "progress": 0.8
+    },
+    "issues": [
+      {
+        "description": "材料堆放影响通道",
+        "category": "文明施工/安全",
+        "risk_level": "pending_confirmation",
+        "responsible_person": "李班长",
+        "due_at": null,
+        "due_text": "今天下午",
+        "confidence": 1,
+        "evidence": [],
+        "needs_confirmation": true
+      }
+    ],
+    "field_evidence": {},
+    "needs_confirmation_fields": [],
+    "warnings": [],
+    "overall_confidence": 1
+  },
+  "expected_issues": ["材料堆放影响通道"]
+}

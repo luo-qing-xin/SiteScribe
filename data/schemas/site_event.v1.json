@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "site_event.v1.json",
+  "title": "Site Event v1",
+  "description": "Published schema for the canonical backend Pydantic SiteEventPayload model.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_type",
+    "construction",
+    "issues",
+    "field_evidence",
+    "needs_confirmation_fields",
+    "warnings",
+    "overall_confidence"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "event_type": { "const": "site_inspection" },
+    "construction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["activity", "crew", "worker_count", "progress"],
+      "properties": {
+        "activity": { "anyOf": [{ "type": "string", "maxLength": 500 }, { "type": "null" }] },
+        "crew": { "anyOf": [{ "type": "string", "maxLength": 200 }, { "type": "null" }] },
+        "worker_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "progress": { "anyOf": [{ "type": "number", "minimum": 0, "maximum": 1 }, { "type": "null" }] }
+      }
+    },
+    "issues": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["description", "category", "risk_level", "responsible_person", "due_at", "due_text", "confidence", "evidence", "needs_confirmation"],
+        "properties": {
+          "description": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "category": { "enum": ["文明施工/安全", "安全", "质量", "文明施工", "其他"] },
+          "risk_level": { "const": "pending_confirmation" },
+          "responsible_person": { "anyOf": [{ "type": "string", "maxLength": 200 }, { "type": "null" }] },
+          "due_at": { "anyOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
+          "due_text": { "anyOf": [{ "type": "string", "maxLength": 200 }, { "type": "null" }] },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "evidence": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/evidence" } },
+          "needs_confirmation": { "type": "boolean" }
+        }
+      }
+    },
+    "field_evidence": {
+      "type": "object",
+      "additionalProperties": { "type": "array", "items": { "$ref": "#/$defs/evidence" } }
+    },
+    "needs_confirmation_fields": { "type": "array", "maxItems": 200, "items": { "type": "string" } },
+    "warnings": { "type": "array", "maxItems": 200, "items": { "type": "string" } },
+    "overall_confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_type", "source_id", "quote", "description", "media_file_id", "confidence"],
+      "properties": {
+        "evidence_type": { "enum": ["confirmed_transcript", "photo", "manual_location", "record_metadata"] },
+        "source_id": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "quote": { "anyOf": [{ "type": "string", "maxLength": 2000 }, { "type": "null" }] },
+        "description": { "anyOf": [{ "type": "string", "maxLength": 1000 }, { "type": "null" }] },
+        "media_file_id": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

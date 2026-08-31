@@ -61,4 +61,3 @@ def require_member(db: Session, user_id: int, project_id: int) -> None:
     member = db.query(ProjectMember).filter_by(project_id=project_id, user_id=user_id).first()
     if not member:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="您不是该项目成员")
-

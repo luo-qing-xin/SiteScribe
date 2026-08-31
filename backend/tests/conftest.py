@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app import main, services, site_event_service
 from app.auth import get_db, hash_password
 from app.config import settings
 from app.db import Base
@@ -14,7 +15,7 @@ from app.models import Project, ProjectLocation, ProjectMember, User
 
 
 @pytest.fixture()
-def db(tmp_path: Path):
+def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
@@ -27,18 +28,43 @@ def db(tmp_path: Path):
     Base.metadata.create_all(engine)
     session = TestingSession()
     password_hash = hash_password("demo123")
-    member = User(username="member", password_hash=password_hash, name="成员", role="安全员", organization="测试单位")
-    outsider = User(username="outsider", password_hash=password_hash, name="外部人员", role="施工员", organization="其他单位")
+    member = User(
+        username="member",
+        password_hash=password_hash,
+        name="成员",
+        role="安全员",
+        organization="测试单位",
+    )
+    outsider = User(
+        username="outsider",
+        password_hash=password_hash,
+        name="外部人员",
+        role="施工员",
+        organization="其他单位",
+    )
     project = Project(name="测试项目", organization="测试单位", address="广州", status="施工中")
-    other_project = Project(name="其他项目", organization="其他单位", address="深圳", status="施工中")
+    other_project = Project(
+        name="其他项目", organization="其他单位", address="深圳", status="施工中"
+    )
     session.add_all([member, outsider, project, other_project])
     session.flush()
-    session.add(ProjectMember(project_id=project.id, user_id=member.id))
+    session.add_all(
+        [
+            ProjectMember(project_id=project.id, user_id=member.id),
+            ProjectMember(project_id=other_project.id, user_id=outsider.id),
+        ]
+    )
     location = ProjectLocation(project_id=project.id, building="3号楼", floor="6层", zone="西侧")
     session.add(location)
     session.commit()
     settings.upload_dir = tmp_path / "uploads"
     settings.upload_dir.mkdir()
+    monkeypatch.setattr(settings, "asr_provider", "mock")
+    monkeypatch.setattr(settings, "event_extraction_provider", "mock")
+    monkeypatch.setattr(settings, "ai_provider", "mock")
+    monkeypatch.setattr(services, "SessionLocal", TestingSession)
+    monkeypatch.setattr(site_event_service, "SessionLocal", TestingSession)
+    monkeypatch.setattr(main, "SessionLocal", TestingSession)
 
     def override_db():
         try:
@@ -72,4 +98,3 @@ def project_data(db):
     location = db.query(ProjectLocation).filter_by(project_id=project.id).one()
     member = db.query(User).filter_by(username="member").one()
     return project, location, member
-

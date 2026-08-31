@@ -37,14 +37,26 @@ def upgrade() -> None:
     op.create_table(
         "project_members",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column(
+            "project_id",
+            sa.Integer(),
+            sa.ForeignKey("projects.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
+        sa.Column(
+            "user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+        ),
         sa.UniqueConstraint("project_id", "user_id"),
     )
     op.create_table(
         "project_locations",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "project_id",
+            sa.Integer(),
+            sa.ForeignKey("projects.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("building", sa.String(30), nullable=False),
         sa.Column("floor", sa.String(30), nullable=False),
         sa.Column("zone", sa.String(30), nullable=False),
@@ -53,8 +65,18 @@ def upgrade() -> None:
     op.create_table(
         "site_records",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("recorder_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column(
+            "project_id",
+            sa.Integer(),
+            sa.ForeignKey("projects.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
+        sa.Column(
+            "recorder_id",
+            sa.Integer(),
+            sa.ForeignKey("users.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
         sa.Column("category", sa.String(30), nullable=False),
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
@@ -63,14 +85,24 @@ def upgrade() -> None:
         sa.Column("gps_accuracy", sa.Float()),
         sa.Column("gps_captured_at", sa.DateTime(timezone=True)),
         sa.Column("gps_status", sa.String(30), nullable=False),
-        sa.Column("location_id", sa.Integer(), sa.ForeignKey("project_locations.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column(
+            "location_id",
+            sa.Integer(),
+            sa.ForeignKey("project_locations.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_table(
         "media_files",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("site_record_id", sa.Integer(), sa.ForeignKey("site_records.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "site_record_id",
+            sa.Integer(),
+            sa.ForeignKey("site_records.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("media_type", sa.String(20), nullable=False),
         sa.Column("original_name", sa.String(255), nullable=False),
         sa.Column("stored_name", sa.String(100), nullable=False, unique=True),
@@ -82,10 +114,27 @@ def upgrade() -> None:
     op.create_table(
         "tasks",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("source_record_id", sa.Integer(), sa.ForeignKey("site_records.id", ondelete="SET NULL")),
-        sa.Column("creator_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("assignee_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column(
+            "project_id",
+            sa.Integer(),
+            sa.ForeignKey("projects.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
+        sa.Column(
+            "source_record_id", sa.Integer(), sa.ForeignKey("site_records.id", ondelete="SET NULL")
+        ),
+        sa.Column(
+            "creator_id",
+            sa.Integer(),
+            sa.ForeignKey("users.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
+        sa.Column(
+            "assignee_id",
+            sa.Integer(),
+            sa.ForeignKey("users.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
         sa.Column("title", sa.String(120), nullable=False),
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("due_at", sa.DateTime(timezone=True), nullable=False),
@@ -96,6 +145,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    for table in ["tasks", "media_files", "site_records", "project_locations", "project_members", "projects", "users"]:
+    for table in [
+        "tasks",
+        "media_files",
+        "site_records",
+        "project_locations",
+        "project_members",
+        "projects",
+        "users",
+    ]:
         op.drop_table(table)
-

@@ -13,6 +13,7 @@ engine = create_engine(settings.database_url, connect_args=connect_args)
 
 
 if settings.database_url.startswith("sqlite"):
+
     @event.listens_for(engine, "connect")
     def enable_sqlite_foreign_keys(dbapi_connection, _connection_record):  # type: ignore[no-untyped-def]
         cursor = dbapi_connection.cursor()
@@ -21,4 +22,3 @@ if settings.database_url.startswith("sqlite"):
 
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
-

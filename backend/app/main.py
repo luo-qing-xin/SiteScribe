@@ -1,7 +1,10 @@
 import io
+import json
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +14,21 @@ from sqlalchemy.orm import Session, joinedload
 
 from .auth import create_token, current_user, get_db, require_member, verify_password
 from .config import settings
-from .models import MediaFile, Project, ProjectLocation, ProjectMember, SiteRecord, Task, User
+from .daily_log_routes import router as daily_log_router
+from .db import SessionLocal
+from .models import (
+    DailyLogSource,
+    Issue,
+    MediaFile,
+    Project,
+    ProjectLocation,
+    ProjectMember,
+    SiteEvent,
+    SiteRecord,
+    Task,
+    User,
+)
+from .phase56_routes import router as phase56_router
 from .schemas import (
     DashboardOut,
     LocationOut,
@@ -27,8 +44,21 @@ from .schemas import (
     TaskPatch,
     UserOut,
 )
+from .services import create_site_record, recover_interrupted_jobs, validate_location
+from .site_event_routes import router as site_event_router
+from .site_event_service import recover_interrupted_event_jobs
+from .voice_routes import router as voice_router
 
-app = FastAPI(title="工地小秘 API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    with SessionLocal() as db:
+        recover_interrupted_jobs(db)
+        recover_interrupted_event_jobs(db)
+    yield
+
+
+app = FastAPI(title="工地小秘 API", version="0.3.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin],
@@ -37,6 +67,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 settings.upload_dir.mkdir(parents=True, exist_ok=True)
+settings.knowledge_dir.mkdir(parents=True, exist_ok=True)
+app.include_router(voice_router)
+app.include_router(site_event_router)
+app.include_router(daily_log_router)
+app.include_router(phase56_router)
 
 RECORD_LOAD = (
     joinedload(SiteRecord.recorder),
@@ -142,20 +177,57 @@ def task_query(db: Session):
 def dashboard(project_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_member(db, user.id, project_id)
     now = datetime.now(UTC)
-    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    tomorrow = today + timedelta(days=1)
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    project_timezone = ZoneInfo(project.timezone)
+    local_now = now.astimezone(project_timezone)
+    local_today = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today = local_today.astimezone(UTC)
+    tomorrow = (local_today + timedelta(days=1)).astimezone(UTC)
     records = record_query(db).filter(SiteRecord.project_id == project_id)
     tasks = task_query(db).filter(Task.project_id == project_id)
     return DashboardOut(
         today_records=records.filter(
             SiteRecord.occurred_at >= today, SiteRecord.occurred_at < tomorrow
         ).count(),
-        pending_tasks=tasks.filter(Task.status.in_(["待处理", "处理中"])).count(),
-        completed_tasks=tasks.filter(Task.status == "已完成").count(),
+        pending_tasks=tasks.filter(
+            Task.status.in_(["OPEN", "IN_PROGRESS", "WAITING_REVIEW", "待处理", "处理中"])
+        ).count(),
+        completed_tasks=tasks.filter(Task.status.in_(["DONE", "已完成"])).count(),
+        confirmed_events=db.query(SiteEvent)
+        .filter(SiteEvent.project_id == project_id, SiteEvent.status == "CONFIRMED")
+        .count(),
+        pending_issues=db.query(Issue)
+        .filter(
+            Issue.project_id == project_id,
+            Issue.status.in_(
+                [
+                    "PENDING_ANALYSIS",
+                    "INSUFFICIENT_EVIDENCE",
+                    "ANALYSIS_FAILED",
+                    "AWAITING_CONFIRMATION",
+                ]
+            ),
+        )
+        .count(),
+        waiting_review_rectifications=tasks.filter(
+            Task.kind == "RECTIFICATION", Task.status == "WAITING_REVIEW"
+        ).count(),
+        closed_rectifications_today=tasks.filter(
+            Task.kind == "RECTIFICATION",
+            Task.status == "DONE",
+            Task.updated_at >= today,
+            Task.updated_at < tomorrow,
+        ).count(),
         recent_records=records.order_by(SiteRecord.occurred_at.desc()).limit(5).all(),
         upcoming_tasks=tasks.filter(
-            Task.status.in_(["待处理", "处理中"]), Task.due_at >= now
-        ).order_by(Task.due_at).limit(5).all(),
+            Task.status.in_(["OPEN", "IN_PROGRESS", "WAITING_REVIEW", "待处理", "处理中"]),
+            Task.due_at >= now,
+        )
+        .order_by(Task.due_at)
+        .limit(5)
+        .all(),
     )
 
 
@@ -174,15 +246,10 @@ def list_records(
     if today_only:
         now = datetime.now(UTC)
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        query = query.filter(SiteRecord.occurred_at >= start, SiteRecord.occurred_at < start + timedelta(days=1))
+        query = query.filter(
+            SiteRecord.occurred_at >= start, SiteRecord.occurred_at < start + timedelta(days=1)
+        )
     return query.order_by(SiteRecord.occurred_at.desc()).all()
-
-
-def validate_location(db: Session, project_id: int, location_id: int) -> ProjectLocation:
-    location = db.get(ProjectLocation, location_id)
-    if not location or location.project_id != project_id:
-        raise HTTPException(status_code=422, detail="所选位置不属于当前项目")
-    return location
 
 
 @app.post("/api/records", response_model=RecordOut, status_code=201)
@@ -191,8 +258,7 @@ def create_record(
 ):
     require_member(db, user.id, payload.project_id)
     validate_location(db, payload.project_id, payload.location_id)
-    item = SiteRecord(**payload.model_dump(), recorder_id=user.id)
-    db.add(item)
+    item = create_site_record(db, payload, user.id)
     db.commit()
     return record_query(db).filter(SiteRecord.id == item.id).one()
 
@@ -228,9 +294,17 @@ def update_record(
 
 
 @app.delete("/api/records/{record_id}", response_model=MessageOut)
-def delete_record(record_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def delete_record(
+    record_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)
+):
     item = get_record_for_user(db, record_id, user)
+    if db.query(DailyLogSource).filter_by(record_id=item.id).first():
+        raise HTTPException(status_code=409, detail="现场记录已被施工日志或安全日志引用，不能删除")
+    if db.query(Issue).filter_by(record_id=item.id).first():
+        raise HTTPException(status_code=409, detail="现场记录已被整改问题引用，不能删除")
     paths = [settings.upload_dir.parent / photo.relative_path for photo in item.photos]
+    for photo in item.photos:
+        db.delete(photo)
     db.delete(item)
     db.commit()
     for path in paths:
@@ -262,7 +336,9 @@ def upload_photos(
                 image.verify()
                 image_format = image.format
         except (UnidentifiedImageError, OSError) as exc:
-            raise HTTPException(status_code=422, detail="仅支持有效的 JPEG、PNG、WebP 图片") from exc
+            raise HTTPException(
+                status_code=422, detail="仅支持有效的 JPEG、PNG、WebP 图片"
+            ) from exc
         if image_format not in FORMAT_MIME:
             raise HTTPException(status_code=422, detail="仅支持 JPEG、PNG、WebP 图片")
         extension = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}[image_format]
@@ -274,6 +350,8 @@ def upload_photos(
             path = settings.upload_dir / stored_name
             path.write_bytes(data)
             media = MediaFile(
+                project_id=item.project_id,
+                created_by=user.id,
                 site_record_id=item.id,
                 original_name=Path(upload.filename or "photo").name[:255],
                 stored_name=stored_name,
@@ -294,23 +372,54 @@ def upload_photos(
 
 def get_photo_for_user(db: Session, photo_id: int, user: User) -> MediaFile:
     photo = db.get(MediaFile, photo_id)
-    if not photo:
+    if not photo or photo.media_type != "image":
         raise HTTPException(status_code=404, detail="照片不存在")
-    record = db.get(SiteRecord, photo.site_record_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="现场记录不存在")
-    require_member(db, user.id, record.project_id)
+    require_member(db, user.id, photo.project_id)
     return photo
 
 
 @app.delete("/api/photos/{photo_id}", response_model=MessageOut)
 def delete_photo(photo_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     photo = get_photo_for_user(db, photo_id, user)
+    if photo.rectification_submission_id or photo.task_id:
+        raise HTTPException(status_code=409, detail="照片已作为整改提交证据，不能删除")
+    if photo.site_record_id:
+        events = (
+            db.query(SiteEvent).filter(SiteEvent.source_record_id == photo.site_record_id).all()
+        )
+        for event in events:
+            payloads = (event.ai_output, event.draft_data, event.confirmed_data, event.evidence_map)
+            if any(_json_references_media(value, photo.id) for value in payloads if value):
+                raise HTTPException(
+                    status_code=409, detail="照片已作为 Event 证据引用，不能单独删除"
+                )
     path = settings.upload_dir.parent / photo.relative_path
     db.delete(photo)
     db.commit()
     path.unlink(missing_ok=True)
     return MessageOut(message="照片已删除")
+
+
+def _json_references_media(value: str, media_id: int) -> bool:
+    try:
+        payload = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if isinstance(payload, dict):
+        if payload.get("media_file_id") == media_id:
+            return True
+        return any(_json_value_references_media(item, media_id) for item in payload.values())
+    return _json_value_references_media(payload, media_id)
+
+
+def _json_value_references_media(value, media_id: int) -> bool:  # type: ignore[no-untyped-def]
+    if isinstance(value, dict):
+        if value.get("media_file_id") == media_id:
+            return True
+        return any(_json_value_references_media(item, media_id) for item in value.values())
+    if isinstance(value, list):
+        return any(_json_value_references_media(item, media_id) for item in value)
+    return False
 
 
 @app.get("/api/photos/{photo_id}/content")
@@ -337,9 +446,11 @@ def list_tasks(
 
 
 def validate_task_refs(db: Session, payload: TaskCreate) -> None:
-    assignee = db.query(ProjectMember).filter_by(
-        project_id=payload.project_id, user_id=payload.assignee_id
-    ).first()
+    assignee = (
+        db.query(ProjectMember)
+        .filter_by(project_id=payload.project_id, user_id=payload.assignee_id)
+        .first()
+    )
     if not assignee:
         raise HTTPException(status_code=422, detail="责任人必须是当前项目成员")
     if payload.source_record_id:
@@ -349,7 +460,9 @@ def validate_task_refs(db: Session, payload: TaskCreate) -> None:
 
 
 @app.post("/api/tasks", response_model=TaskOut, status_code=201)
-def create_task(payload: TaskCreate, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def create_task(
+    payload: TaskCreate, user: User = Depends(current_user), db: Session = Depends(get_db)
+):
     require_member(db, user.id, payload.project_id)
     validate_task_refs(db, payload)
     item = Task(**payload.model_dump(), creator_id=user.id)
@@ -379,11 +492,15 @@ def update_task(
     db: Session = Depends(get_db),
 ):
     item = get_task_for_user(db, task_id, user)
+    if item.kind == "RECTIFICATION":
+        raise HTTPException(status_code=409, detail="整改任务须使用专用状态流转接口")
     changes = payload.model_dump(exclude_unset=True)
     if "assignee_id" in changes:
-        member = db.query(ProjectMember).filter_by(
-            project_id=item.project_id, user_id=changes["assignee_id"]
-        ).first()
+        member = (
+            db.query(ProjectMember)
+            .filter_by(project_id=item.project_id, user_id=changes["assignee_id"])
+            .first()
+        )
         if not member:
             raise HTTPException(status_code=422, detail="责任人必须是当前项目成员")
     for key, value in changes.items():
@@ -395,6 +512,8 @@ def update_task(
 @app.delete("/api/tasks/{task_id}", response_model=MessageOut)
 def delete_task(task_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     item = get_task_for_user(db, task_id, user)
+    if item.kind == "RECTIFICATION":
+        raise HTTPException(status_code=409, detail="整改任务不能删除，只能按规则取消")
     db.delete(item)
     db.commit()
     return MessageOut(message="待办已删除")
